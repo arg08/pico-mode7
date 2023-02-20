@@ -1,0 +1,240 @@
+
+; Sysclk must be a multiple of 12 for Mode 7, multiple of 8 for other modes.
+; So 96MHz covers both but is a bit slow.
+; 132MHz works for Mode 7 and is legal but doesn't cover other modes (use 128)
+; 144MHz covers both, but is a mild overclock.
+.define public SYSCLK_MHZ     96
+
+; ------------------------------------------------------------------------
+; Definitions for Roland's board
+
+.define public PIN_AD_BASE     2
+.define public PIN_O0         18
+.define public PIN_NOE        19
+
+.define public PIN_RGB_EN      0
+.define public PIN_SYNC_IN     1
+
+.define public PIN_RGB_RO     10
+.define public PIN_RGB_GO     11
+.define public PIN_RGB_BO     12
+
+.define public PIN_RGB_RI     20
+.define public PIN_RGB_GI     21
+.define public PIN_RGB_BI     22
+         
+.define public PIN_SEL_BASE   26
+.define public PIN_SELDT      (PIN_SEL_BASE + 0)
+.define public PIN_SELAH      (PIN_SEL_BASE + 1)
+.define public PIN_SELAL      (PIN_SEL_BASE + 2)
+
+; ------------------------------------------------------------------------
+; PAL info:
+;
+; Lines are always 64us, there are no half-lines: VSYNC may come in
+; the middle of a line, but after VSYNC the lines of the new field
+; are still multiples of 64us after the lines of the previous field.
+;
+; HSYNC lasts 4.7us, equalising pulses are 2.35us
+; Front porch (end of active video to start of HSYNC next line): 1.65us
+; Back porch (end of HSYNC to start of active video): 5.7us
+; (so leading edge of HSYNC to active video is 10.4 inc HSYNC)
+; BBC has 4.1us extra delay to first pixel, so 14.5us HSYNC edge -> 1st pixel
+;
+; Equalising pulses occur twice per line, one aligned with where HSYNC
+; would have been, one in the middle of the line.
+; There are always 5 equalising pulses before VSYNC - at the end of the
+; first field the first equalising pulse replaces the HSYNC of line 311,
+; at the end of the 2nd field the first eq pulse is in the middle of line 623.
+; VSYNC always lasts 2.5 lines and has wide eq pulses (positive-going)
+; during it.  Falling edge of VSYNC goes where the falling edge of an
+; eq pulse would have been.  On first field (line 1), the falling edge of
+; VSYNC is aligned with the HSYNC pulses of active lines; on the 2nd field
+; it's half way through line 313
+
+
+
+; ------------------------------------------------------------------------
+; Program for generating character-cell formatted output
+;
+; CPU writes 32-bit words to the FIFO describing 1 character cell of output
+; (1us, 12 pixels).
+;
+; bits 0-7	: background colour RGB
+; bits 8-14	: foreground colour RGB
+; bit 15	: always '1' to distinguish EOL marker
+; bits 16-27 : pixel data, lsb output first (so on the left).
+; bits 28-31	: always 0.
+;
+; The CPU writes a value with the lower 16 bits all-zero to the FIFO
+; as an end-of-line marker, causing the SM to wait for HSYNC before continuing.
+; Bits 17-28 of that word are a count of the back-porch delay
+; (delay from sync falling edge to first pixel) in CLK_SYS cycles,
+; so 1914 for 14.5us at 132MHz. Bit 16 gets processed as if it were a pixel,
+; value doesn't matter as foreground/background are both zero, setting the
+; outputs to black for the blanking interval.
+;
+; The marker bit (b15) ensures that the first 16 bits are never zero
+; for valid character words, to allow detection of the EOL marker.
+;
+; This has 7/8 bits for foreground/background colours where basic hardware
+; only needs 3 bits each, but this leaves room for (eg.) VGA output with
+; 2 bits per R/G/B and aligns the pixel data conveniently.
+;
+; Note that after the last pixel the outputs are not set back to black:
+; the EOL marker is needed to do that, so one is needed after the last line
+; even though we don't actually need to wait for the next HSYNC at that point.
+
+.program mode7_output
+; Expects out pin mapping for RGB out (typically 3 bits, can be up to 7).
+; In pin mapping set for the HSYNC input (looks for falling edge)
+; ISR shifts right (not actually used as input, no autopush, threshold not used)
+; OSR shifts right, no autopull, threshold 28
+; JMP pin not used, set pins not used, sideset not used.
+; FIFOs can be joined - only using output FIFO
+nextline:
+	wait 0 PIN 0		; Wait for falling edge of sync
+
+	out X,12			; Get backporch delay from OSR (max 4095)
+	jmp !X mainloop		; Not strictly needed - avoid huge delay if
+						; accidentally zero, only likely to happen at startup
+backporch:
+	jmp X-- backporch
+
+.wrap_target
+mainloop:
+	jmp !OSRE not_empty
+PUBLIC entrypoint:
+	pull block			; Re-fill the OSR - X=1 not a valid pixel
+	out y,16			; Get the foreground/background colours, plus flag bit
+						; Note we don't test the flag bit until next time round
+nextpix:
+	out X,1				; Get value of one pixel in X
+	mov ISR,Y			; Put foreground/background colours in ISR
+	jmp !X bkgnd		; X still has the pixel (0 or 1)
+	in NULL,8			; Shift down the ISR to get foreground colour
+do_out:
+	mov pins,ISR [((SYSCLK_MHZ/12)-8)]	; Output the data
+.wrap					; Total 8 instructions in loop plus 3 wait for 132MHz
+						; use [4] for 144MHz, [0] for 96MHz.
+
+bkgnd:
+	jmp do_out			; This extra jump (rather than just putting the
+						; bkgnd: label where do_out: is) evens up the 
+						; number of cycles for the two routes round the loop
+
+; Similarly we could just skip over the OSR refill code for not_empty,
+; but that would make the path round the loop too short so we come here
+; to waste some time, and in fact can take care of testing for the end of line
+; marker while we've time to spare, taking that one instruction out of the
+; critical path.  This has the very convenient side-effect that one pixel
+; of the end-of-line marker got processed as if it were a pixel before we got
+; here, seetting the outputs to black ready for the blanking interval
+not_empty:
+	jmp !y nextline		; Test for end of line marker (all zero)
+	jmp nextpix [2]		; Similar for the case where we need to refill OSR
+						; which took 4 instructions - other path is
+						; come here and we do a JMP with 3 waits
+
+
+
+; ------------------------------------------------------------------------
+; Output function for simple bitmap pixel display.
+
+; Assumes Y pre-loaded with number of pixels per line (480 for mode 7).
+; Delays in this version are for Mode 7 with 12 pixels per microsecond
+; and 132MHz clock = 11 clocks/pixel.
+; Need to change clock to 128MHz and reduce delays to 8 clocks per pixel
+; for other modes (or overclock to 144MHz which covers both).
+; XXXXXX UNTESTED, NOT CURRENTLY USED
+.program rgb_out
+.wrap_target
+	wait 0 GPIO 1	;  Assumed started by an HSYNC interrupt handler so sync is high on entry
+	set X,29 [25]	;  14.5us back porch delay (=1914 cycles) - fine tune horiz position by the delay cycles on this instruction
+backporch:
+	nop [31]		; Total 64 cycles round the loop, so 29*64 = 1856.  58 more cycles to spread over other instructions before the first pixel.
+	jmp X-- backporch [31]
+	mov X,Y [31]		; Y is pre-loaded with number of pixels per line
+	pixel_loop:
+	out pins,4	[10]	; Assumes auto-pop.  Assumes output mapping with only 3 pins enabled so 4th bit is discarded
+	jmp X-- pixel_loop
+.wrap
+
+
+; For capturing input syncs
+; XXXXXX UNTESTED, NOT CURRENTLY USED
+.program sync_measure
+.wrap_target
+	mov X,~NULL
+	wait 0 GPIO 1 [31]	; Wait for sync low.  Delay for deglitching purposes.
+count:
+	jmp pin done	; Exit when sync high again
+	jmp X-- count
+done:
+	in X, 32 [31]	; Assumes autopush.	Delay is for deglitching purpos
+.wrap
+
+; To generate syncs from software-provided list of periods.
+; Values arriving in FIFO have bits 0..15 period with sync low,
+; bits 16..31 period with sync high.
+; Durations are in clk_sys cycles, -2  (ie. value zero gives period of 2,
+; value 1 gives period 3)
+; 1 bit of optional side-set, configured to the sync pin.
+; OSR shifts right, auto-pull at 32 count
+; in/set/out mappings not used.
+
+.program	sync_gen
+.side_set 1 opt
+.wrap_target
+	out X,16 side 0		; 16 bits of low time
+lo_loop:
+	jmp X-- lo_loop		
+	out X,16 side 1		; 16 bits of high time
+hi_loop:
+	jmp	X-- hi_loop
+.wrap
+
+
+% c-sdk {
+static inline void mode7_output_init(PIO pio, uint sm, uint offset)
+{
+	pio_sm_config cfg = mode7_output_program_get_default_config(offset);
+
+	// This SM wants the sync pin as input and RGB pins as output
+	sm_config_set_in_pins(&cfg, PIN_SYNC_IN);
+	sm_config_set_out_pins(&cfg, PIN_RGB_RO, 3);
+	// No set/sideset pin mappings.
+	// Since it's output-only, we can join the FIFOs for deeper buffering
+	sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_TX);
+	// Output: shift right, autopull, 28 bits.
+	sm_config_set_out_shift(&cfg, true, false, 28);
+	// ISR not actually used for input, but must be set to shift right.
+	sm_config_set_in_shift(&cfg, true, false, 32);
+
+	// Entrypoint is not at the start of the program
+	pio_sm_init(pio, sm, offset + mode7_output_offset_entrypoint, &cfg);
+
+	// pio_sm_set_enabled() left for the caller to do: will block
+	// waiting for a word in the FIFO as soon as it starts.
+}
+
+static inline void sync_gen_init(PIO pio, uint sm, uint offset)
+{
+	pio_sm_config cfg = sync_gen_program_get_default_config(offset);
+
+	// This SM wants the sync pin as side-set output, no other pin mappings
+	sm_config_set_sideset_pins(&cfg, PIN_SYNC_IN);
+	// Since it's output-only, we can join the FIFOs for deeper buffering
+	sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_TX);
+	// Output: shift right, autopull, 32 bits.
+	sm_config_set_out_shift(&cfg, true, false, 32);
+
+	// Entrypoint is at the start of the program
+	pio_sm_init(pio, sm, offset, &cfg);
+
+	// pio_sm_set_enabled() left for the caller to do: will block
+	// waiting for a word in the FIFO as soon as it starts.
+}
+
+
+%}
