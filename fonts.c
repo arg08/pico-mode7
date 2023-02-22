@@ -1,4 +1,4 @@
-
+#include "mode7_demo.h"
 /*
   This font data was extracted from the fonts supplied with Xbeeb V0.36
   but substantially re-formatted.  Those fonts contained the following
@@ -17342,3 +17342,29 @@ static const uint16_t font_sep_graphic_dh_lower[96 * 19] = {
 	0b000000000000,
 };
 
+
+/* Font list, indexed with following bits:
+   1 - double height
+   2 - 2nd row of double height
+   4 - graphics
+   8 - separated mode
+*/
+
+const uint16_t * const font_list[16] = {
+  font_std,
+  font_std_dh_upper,
+  font_std,			/* 2nd row, but this char not double	*/
+  font_std_dh_lower,
+  font_graphic,
+  font_graphic_dh_upper,
+  font_graphic,
+  font_graphic_dh_lower,
+  font_std,
+  font_std_dh_upper,
+  font_std,
+  font_std_dh_lower,
+  font_sep_graphic,
+  font_sep_graphic_dh_upper,
+  font_sep_graphic,
+  font_sep_graphic_dh_lower
+};

@@ -1,6 +1,7 @@
-// Which PIO to use.  This should be in a board definition file.
-#define	VIDOUT_PIO	pio1
-#define	VIDOUT_SM	0
+
+#include "mode7_demo.h"
+
+#include "mode7.pio.h"
 
 // Back porch delay from falling edge of HSYNC to first pixel, in units
 // of the PIO clock.  Can tweak this to get the horizontal position right.
@@ -17,45 +18,27 @@
 // Rate of flashing, as a count of 50Hz fields on and off
 #define	FLASH_RATE		16
 
+// Wait for VSYNC and feed an appropriate number of dummy lines
+// into the PIO so that the next thing to go in the FIFO is the
+// pixel data for the first line.
+// Returns true if it's the odd field, false if even field
+static bool __force_inline wait_for_vsync(void)
+{
+	uint32_t falling, rising, vsync_end;
 
-#include <stdbool.h>
-#include <stdint.h>
-#include "pico/stdlib.h"
-#include "hardware/pio.h"
-#include "mode7.pio.h"
+	// Start by looking for a wide pulse
+}
 
-
-/* Font list, indexed with following bits:
-   1 - double height
-   2 - 2nd row of double height
-   4 - graphics
-   8 - separated mode
-*/
-
-#include "fonts.c"		// The actual font data
-
-static const uint16_t *font_list[16] = {
-  font_std,
-  font_std_dh_upper,
-  font_std,			/* 2nd row, but this char not double	*/
-  font_std_dh_lower,
-  font_graphic,
-  font_graphic_dh_upper,
-  font_graphic,
-  font_graphic_dh_lower,
-  font_std,
-  font_std_dh_upper,
-  font_std,
-  font_std_dh_lower,
-  font_sep_graphic,
-  font_sep_graphic_dh_upper,
-  font_sep_graphic,
-  font_sep_graphic_dh_lower
-};
 
 // Generate one field of teletext display, with the PIO program handling
 // HSYNC timing and the expansion of 12 horizontal pixels.
-void ttxt_display_field(uint8_t *ttxt_buf, bool flash_on)
+// This waits for VSYNC before starting, measures the relative HSYNC/VSYNC
+// timing to determine whether it is the odd or even field, and exits
+// after the last visible line.  Hence it should be called in a loop
+// to produce a continuous display, with the caller having a little time
+// to do some housekeeping between calls and still get there in time for
+// the next VSYNC.
+void mode7_display_field(uint8_t *ttxt_buf, bool flash_on)
 {
 	unsigned line;			// Which line out of the 25? (0..24)
 	unsigned row;			// Which pixel row within a line (0..19)
@@ -85,9 +68,12 @@ void ttxt_display_field(uint8_t *ttxt_buf, bool flash_on)
 	int enable_conceal = false;
 #endif
 
+	// Start on row 0 or 1 depending on whether this is odd or even field
+	if (wait_for_vsync()) row = 0;
+	else row = 1;
+
 	dh_row2 = false;
 	line = 0;
-	row = 0;		// 0 or 1 depending on odd/even field
 	do
 	{
 		// Reset at start of line
@@ -169,7 +155,7 @@ void ttxt_display_field(uint8_t *ttxt_buf, bool flash_on)
 			// Output the pixels of this character to the PIO
 			// Value written has the foreground/background colours,
 			// a flag bit, and the pixel data.
-			pio_sm_put_blocking(VIDOUT_PIO, VIDOUT_SM,
+			pio_sm_put_blocking(VIDEO_PIO, VIDEO_MODE7_SM,
 				colours | (fontp[row] << 16));
 
 
@@ -255,7 +241,7 @@ void ttxt_display_field(uint8_t *ttxt_buf, bool flash_on)
 		// Tell the PIO to wait for HSYNC before the next row
 		// This has the low 16 bits clear to distinguish it from normal
 		// pixel data, and has the back-porch delay in the high bits.
-		pio_sm_put_blocking(VIDOUT_PIO, VIDOUT_SM, BACK_PORCH << 16);
+		pio_sm_put_blocking(VIDEO_PIO, VIDEO_MODE7_SM, BACK_PORCH << 16);
 
 		row += 2;		// Interlaced display, so step on by two rows
 
@@ -284,3 +270,8 @@ void ttxt_display_field(uint8_t *ttxt_buf, bool flash_on)
 	} while (line < 25);
 }
 
+
+// Initialise PIO etc. ready to call mode7_display_field()
+void mode7_init(void)
+{
+}

@@ -214,10 +214,22 @@ static inline void mode7_output_init(PIO pio, uint sm, uint offset)
 	// Entrypoint is not at the start of the program
 	pio_sm_init(pio, sm, offset + mode7_output_offset_entrypoint, &cfg);
 
-	// pio_sm_set_enabled() left for the caller to do: will block
-	// waiting for a word in the FIFO as soon as it starts.
+	// RGB pins are outputs, sync pin is input (but not pinmuxed to PIO
+	// so we don't need to care about the pindir)
+	pio_sm_set_consecutive_pindirs(pio, sm, PIN_RGB_RO, 3, true);
+
+	// Start the SM - will immediately block waiting for a word in the FIFO.
+	// Note that the pin number is configured within the SM, but the GPIO
+	// multiplexing is not yet configured to enable the physical pin.
+	// The output values won't be sensible until that first word is
+	// written, so that's the time to do gpio
 }
 
+
+// Set up the sync generator.
+// This is just as a test-harness: in the real system the sync is an
+// input and comes from the Electron; this turns the SYNC_IN pin
+// to an output and generates syncs from software.
 static inline void sync_gen_init(PIO pio, uint sm, uint offset)
 {
 	pio_sm_config cfg = sync_gen_program_get_default_config(offset);
@@ -226,14 +238,21 @@ static inline void sync_gen_init(PIO pio, uint sm, uint offset)
 	sm_config_set_sideset_pins(&cfg, PIN_SYNC_IN);
 	// Since it's output-only, we can join the FIFOs for deeper buffering
 	sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_TX);
+
 	// Output: shift right, autopull, 32 bits.
-	sm_config_set_out_shift(&cfg, true, false, 32);
+	sm_config_set_out_shift(&cfg, true, true, 32);
+
+	// Set the pindir and the pin multiplexing
+	pio_sm_set_consecutive_pindirs(pio, sm, PIN_SYNC_IN, 1, true);
+	pio_gpio_init(pio, PIN_SYNC_IN);
 
 	// Entrypoint is at the start of the program
 	pio_sm_init(pio, sm, offset, &cfg);
 
-	// pio_sm_set_enabled() left for the caller to do: will block
-	// waiting for a word in the FIFO as soon as it starts.
+	// Start the SM - will immediately block waiting for a word in the FIFO.
+	// Note that the pin number is configured within the SM, but the GPIO
+	// multiplexing is not yet configured to enable the physical pin.
+	pio_sm_set_enabled(pio, sm, true);
 }
 
 

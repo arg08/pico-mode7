@@ -28,6 +28,9 @@ FetchContent_MakeAvailable(cmake_git_version_tracking)
 add_executable(mode7
         main.c
 		mode7.c
+		makesyncs.c
+		fonts.c
+		test_pages.c
         )
 
 pico_generate_pio_header(mode7 ${CMAKE_CURRENT_LIST_DIR}/mode7.pio)
@@ -41,6 +44,7 @@ pico_enable_stdio_uart(mode7 0)
 # pull in common dependencies
 target_link_libraries(mode7
 	pico_stdlib
+	pico_multicore
 	hardware_dma
 	hardware_pio
 	cmake_git_version_tracking
