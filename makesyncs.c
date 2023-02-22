@@ -58,6 +58,10 @@
  So we use 15us/17us for the odd, 47us/49us for the even,
  referenced in each case to a falling HSYNC
 
+ Odd field VSYNC sits over 2 HSYNCs, even field sits over three,
+ so there's a total of 625-5 = 620 HSYNCs to insert (including the
+ two with short gaps after them, remainder are standard)
+
 */
 
 
@@ -92,13 +96,13 @@ static void __not_in_flash_func(pio_irq0_handler)(void)
 			// that gives 128 total (2 lines).
 			write_value(VSYNC_T, (SYSCLK_MHZ * 17));
 			break;
-		// 310 ordinary lines in between, total 19840us
-		case 311:
+		// 309 ordinary lines in between, total 19840us
+		case 310:
 			// This is the last HSYNC before the 2nd field VSYNC
 			// with a large gap (total 47us)
 			write_value(HSYNC_T, (SYSCLK_MHZ * 47) - HSYNC_T);
 			break;
-		case 312:
+		case 311:
 			// This is the VSYNC at the top of the 2nd field
 			// and the 49us gap to the next HSYNC (total 209)
 			// Combined with the 47us just before totals 256us (4 lines)
