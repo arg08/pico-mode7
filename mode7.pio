@@ -12,8 +12,11 @@
 .define public PIN_O0         18
 .define public PIN_NOE        19
 
-.define public PIN_RGB_EN      0
-.define public PIN_SYNC_IN     1
+;.define public PIN_RGB_EN      0
+;.define public PIN_SYNC_IN     1
+
+.define public PIN_RGB_EN      2
+.define public PIN_SYNC_IN     3
 
 .define public PIN_RGB_RO     10
 .define public PIN_RGB_GO     11
@@ -51,6 +54,8 @@
 ; eq pulse would have been.  On first field (line 1), the falling edge of
 ; VSYNC is aligned with the HSYNC pulses of active lines; on the 2nd field
 ; it's half way through line 313
+;
+; However, Electron doesn't do the equalising pulses.
 
 
 
@@ -206,7 +211,7 @@ static inline void mode7_output_init(PIO pio, uint sm, uint offset)
 	// No set/sideset pin mappings.
 	// Since it's output-only, we can join the FIFOs for deeper buffering
 	sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_TX);
-	// Output: shift right, autopull, 28 bits.
+	// Output: shift right, NO autopull, 28 bits.
 	sm_config_set_out_shift(&cfg, true, false, 28);
 	// ISR not actually used for input, but must be set to shift right.
 	sm_config_set_in_shift(&cfg, true, false, 32);
@@ -222,7 +227,8 @@ static inline void mode7_output_init(PIO pio, uint sm, uint offset)
 	// Note that the pin number is configured within the SM, but the GPIO
 	// multiplexing is not yet configured to enable the physical pin.
 	// The output values won't be sensible until that first word is
-	// written, so that's the time to do gpio
+	// written, so that's the time to do pio_gpio_init()
+	pio_sm_set_enabled(pio, sm, true);
 }
 
 

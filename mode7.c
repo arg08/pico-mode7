@@ -3,6 +3,8 @@
 
 #include "mode7.pio.h"
 
+// Adjust BACK_PORCH and VERTICAL_POS to position the display on screen.
+
 // Back porch delay from falling edge of HSYNC to first pixel, in units
 // of the PIO clock.  Can tweak this to get the horizontal position right.
 // Official back-porch (rising HSYNC to video) is 5.7us, plus 4.7us for
@@ -10,13 +12,20 @@
 // = 5.7+4.7+4.1 = 14.5us  (14.5 = 29/2)
 #define BACK_PORCH	(SYSCLK_MHZ * 29 / 2)
 
+// There are 320 video lines after the VSYNC, of which we output on 250.
+// So there's 70 blank lines to distribute in top/bottom border.
+// Even split would be 35, but I believe the gap at the top is normally
+// a bit smaller.  This is also not going to be 100% right between
+// Electron-style syncs (normal HSYNCs start right after VSYNC)
+// and proper PAL where there are equalising pulses.
+// This constant defines the number of skipped lines after the first
+// HSYNC detected after VSYNC.
+#define	VERTICAL_POS	30
+
 // This should be 20, but the current font (optimised to fit in a 640x480
 // VGA screen) has only 19 rows per character line.
 #define	ROWS_PER_LINE	19
 #define	FONT_ROWS		19
-
-// Rate of flashing, as a count of 50Hz fields on and off
-#define	FLASH_RATE		16
 
 // Wait for VSYNC and feed an appropriate number of dummy lines
 // into the PIO so that the next thing to go in the FIFO is the
@@ -24,9 +33,48 @@
 // Returns true if it's the odd field, false if even field
 static bool __force_inline wait_for_vsync(void)
 {
-	uint32_t falling, rising, vsync_end;
+	uint32_t falling, rising, vsync_end, width;
+	bool got_vsync = false;
 
-	// Start by looking for a wide pulse
+	// Measure the width of low-going pulses.  Note that we don't check
+	// for the signal being high before entering the loop: worst thing that
+	// can happen is we see a pulse shorter than it really is, but we are
+	// first looking for a VSYNC - so we might mistake our VSYNC for an HSYNC,
+	// but otherwise we'd have missed it altogether so the effect is the same.
+	for (;;)
+	{
+		// Record timestamps of the rising and falling edges
+		while (gpio_get(PIN_SYNC_IN) != 0)
+			;
+		falling = time_us_32();
+		while (gpio_get(PIN_SYNC_IN) == 0)
+			;
+		rising = time_us_32();
+		width = rising - falling;	// Pulse width in microseconds approx
+		if (width > 25)
+		{
+			// Seems like a VSYNC
+			got_vsync = true;
+			vsync_end = rising;
+		}
+		else if ((width < 7) && (width > 2))
+		{
+			// Seems like an HSYNC.  If we've already seen a VSYNC
+			// we are ready to go.
+			if (got_vsync) break;
+		}
+	}
+	// Sync has just gone high after the first HSYNC, so we can tell the
+	// PIO to start counting HSYNCs from here.
+	for (unsigned u = 0; u < VERTICAL_POS; u++)
+		pio_sm_put_blocking(VIDEO_PIO, VIDEO_MODE7_SM, BACK_PORCH << 16);
+
+	// Here with vsync_end=timestamp of the rising edge of the VSYNC,
+	// falling=/ the falling edge of HSYNC.  For an Electron, they should be
+	// either 17 or 49us apart, indicating which field; however on
+	// proper video with equalising pulses there could be a multiple
+	// of 64us extra so we take the number mod 64
+	return (((falling - vsync_end) % 64) > 32);
 }
 
 
@@ -38,7 +86,7 @@ static bool __force_inline wait_for_vsync(void)
 // to produce a continuous display, with the caller having a little time
 // to do some housekeeping between calls and still get there in time for
 // the next VSYNC.
-void mode7_display_field(uint8_t *ttxt_buf, bool flash_on)
+void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 {
 	unsigned line;			// Which line out of the 25? (0..24)
 	unsigned row;			// Which pixel row within a line (0..19)
@@ -50,7 +98,7 @@ void mode7_display_field(uint8_t *ttxt_buf, bool flash_on)
 	bool dh_this_row, dh_row2;
 
 	// Points to the current character within the 40x25 buffer
-	uint8_t  *chp;
+	const uint8_t  *chp;
 	// Character value retrieved from *chp
 	unsigned ch;
 
@@ -235,7 +283,6 @@ void mode7_display_field(uint8_t *ttxt_buf, bool flash_on)
 			}
 		}
 
-
 		// End-of row processing
 
 		// Tell the PIO to wait for HSYNC before the next row
@@ -274,4 +321,23 @@ void mode7_display_field(uint8_t *ttxt_buf, bool flash_on)
 // Initialise PIO etc. ready to call mode7_display_field()
 void mode7_init(void)
 {
+	unsigned offset;
+
+	// Load the PIO program
+	offset = pio_add_program(VIDEO_PIO, &mode7_output_program);
+
+	// Initialise and start the PIO state machine
+	mode7_output_init(VIDEO_PIO, VIDEO_MODE7_SM, offset);
+
+	// PIO will be blocked waiting for something in the FIFO before
+	// it does anything.  Feed it an end-of-line, which will force
+	// the outputs to black while it waits for the HSYNC (it will then
+	// get blocked again until we get around to starting up properly).
+	pio_sm_put_blocking(VIDEO_PIO, VIDEO_MODE7_SM, BACK_PORCH << 16);
+
+	// Now safe to enable the outputs
+	gpio_put(PIN_RGB_EN, 1);			// Active low enable on the passthrough
+	pio_gpio_init(VIDEO_PIO, PIN_RGB_RO);
+	pio_gpio_init(VIDEO_PIO, PIN_RGB_GO);
+	pio_gpio_init(VIDEO_PIO, PIN_RGB_BO);
 }

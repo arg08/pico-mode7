@@ -25,9 +25,20 @@
 // This gets the git revision number and state into the binary
 #include "git.h"
 
+
+// Rate of flashing, as a count of 50Hz fields on and off
+#define	FLASH_RATE		16
+// Rate of switching between the demo images
+#define	CAROUSEL_RATE	(5*50)
+
+
 static void core1_main_loop(void)
 {
-	mode7_init();
+	unsigned carousel_count = 0, flash_count = 0;
+	bool flash_on = false;
+	unsigned page_no = 0;
+	const uint8_t *current_page = test_pages[0];
+
 
 #if GENERATE_SYNCS
 	// Launch the sync generator, which continues under IRQ.
@@ -37,8 +48,24 @@ static void core1_main_loop(void)
 	syncgen_start();
 #endif
 
+	// Initialise the PIO etc.
+	mode7_init();
+
 	for (;;)
 	{
+		mode7_display_field(current_page, flash_on);
+		if (flash_count++ >= FLASH_RATE)
+		{
+			flash_on = !flash_on;
+			flash_count = 0;
+		}
+		if (carousel_count++ >= CAROUSEL_RATE)
+		{
+			carousel_count = 0;
+			current_page++;
+			if (page_no >= NOOF_TEST_PAGES) page_no = 0;
+			current_page = test_pages[page_no];
+		}
 	}
 }
 

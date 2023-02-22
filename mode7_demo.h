@@ -17,7 +17,7 @@ extern const uint8_t * const test_pages[NOOF_TEST_PAGES];
 extern const uint16_t * const font_list[16];
 
 // mode7.c
-extern void mode7_display_field(uint8_t *ttxt_buf, bool flash_on);
+extern void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on);
 extern void mode7_init(void);
 
 // makesyncs.c
