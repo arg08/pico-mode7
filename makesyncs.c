@@ -142,6 +142,4 @@ void syncgen_start(void)
 	// These enable bits are in order of SM number
 	hw_set_bits(&VIDEO_PIO->inte0,
 		(PIO_IRQ0_INTE_SM0_TXNFULL_BITS << VIDEO_SYNCGEN_SM));
-
-	printf("Started syncgen\n");
 }
