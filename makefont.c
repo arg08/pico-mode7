@@ -42,6 +42,7 @@ static const char copyright[] =
 ";
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 // 12*19 bits per character = 228 bits = 28.5 bytes, so 29 bytes each entry here
@@ -1845,9 +1846,12 @@ static void print_one_font(const char *name, const uint8_t *font)
 	// row 19
 	// We want to keep the ordering, but unpack into 16 bits/character
 	// with the high bits in each word zero.
-	// There are 19 rows in each character
+	// There are 19 rows in each character, but we want 20, so we duplicate
+	// the last row. (which is always blank anyhow except in the DH fonts)
+	unsigned last_nonzero = 0;
+	unsigned save_bits;
 
-	printf("static const uint16_t %s[96 * 19] = {\n", name);
+	printf("const uint16_t %s[96 * 20] = {\n", name);
 	for (ch = 0; ch < 96; ch++)
 	{
 		unsigned bits;
@@ -1868,18 +1872,33 @@ static void print_one_font(const char *name, const uint8_t *font)
 				font += 1;
 			}
 
+			// Print in reverse order
+			save_bits = bits;
 			printf("\t0b");
 			for (x = 0; x < 12; x++, bits >>= 1)
 				putchar((bits & 1) ? '1' : '0');
 			printf(",\n");
 		}
+		if (save_bits != 0) last_nonzero++;
+
+		// Print the duplicate of the last row
+		printf("\t0b");
+		for (bits = save_bits, x = 0; x < 12; x++, bits >>= 1)
+			putchar((bits & 1) ? '1' : '0');
+		printf(",\n");
+
+
+
 		font += 1;	// Skip 4 bits of padding at end of each char.
 	}
 	printf("};\n\n");
+	fprintf(stderr, "%s: %u chars have nonzero last lines\n",
+		name, last_nonzero);
 }
 
 int main(int argc, char **argv)
 {
+	puts("#include \"mode7_demo.h\"");
 	puts(copyright);
 	print_one_font("font_std", font_std);
 	print_one_font("font_std_dh_upper", font_std_dh_upper);

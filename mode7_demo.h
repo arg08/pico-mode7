@@ -14,7 +14,15 @@
 extern const uint8_t * const test_pages[NOOF_TEST_PAGES];
 
 // fonts.c
-extern const uint16_t * const font_list[16];
+extern const uint16_t font_std[96*20];
+extern const uint16_t font_std_dh_upper[96*20];
+extern const uint16_t font_std_dh_lower[96*20];
+extern const uint16_t font_graphic[96*20];
+extern const uint16_t font_graphic_dh_upper[96*20];
+extern const uint16_t font_graphic_dh_lower[96*20];
+extern const uint16_t font_sep_graphic[96*20];
+extern const uint16_t font_sep_graphic_dh_upper[96*20];
+extern const uint16_t font_sep_graphic_dh_lower[96*20];
 
 // mode7.c
 extern void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on);

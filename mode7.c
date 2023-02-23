@@ -8,9 +8,10 @@
 // Back porch delay from falling edge of HSYNC to first pixel, in units
 // of the PIO clock.  Can tweak this to get the horizontal position right.
 // Official back-porch (rising HSYNC to video) is 5.7us, plus 4.7us for
-// HSYNC itself, plus 4.1us that BBC inserts to centre the image
-// = 5.7+4.7+4.1 = 14.5us  (14.5 = 29/2)
-#define BACK_PORCH	(SYSCLK_MHZ * 29 / 2)
+// HSYNC itself leaves 53.6us for active video, of which we actually use 40
+// so 13.6 spare, put 6.8 either side to centre it.
+// = 5.7+4.7+6.8 = 17.2us
+#define BACK_PORCH	(SYSCLK_MHZ * 172 / 10)
 
 // There are 320 video lines after the VSYNC, of which we output on 250.
 // So there's 70 blank lines to distribute in top/bottom border.
@@ -22,10 +23,39 @@
 // HSYNC detected after VSYNC.
 #define	VERTICAL_POS	30
 
-// This should be 20, but the current font (optimised to fit in a 640x480
-// VGA screen) has only 19 rows per character line.
-#define	ROWS_PER_LINE	19
-#define	FONT_ROWS		19
+// Note that the current font was optimised to fit in a 640x480 VGA screen,
+// so had only 19 rows per character line.  It has now been stretched by
+// duplicating the last row (which is always zero on alpha characters anyhow),
+// but may not be right in the case of graphics.
+#define	ROWS_PER_LINE	20
+#define	FONT_ROWS		20
+
+
+
+/* Font list, indexed with following bits:
+   1 - double height
+   2 - 2nd row of double height
+   4 - graphics
+   8 - separated mode
+*/
+static const uint16_t * const font_list[16] = {
+	font_std,
+	font_std_dh_upper,
+	font_std,                    /* 2nd row, but this char not double    */
+	font_std_dh_lower,
+	font_graphic,
+	font_graphic_dh_upper,
+	font_graphic,
+	font_graphic_dh_lower,
+	font_std,
+	font_std_dh_upper,
+	font_std,
+	font_std_dh_lower,
+	font_sep_graphic,
+	font_sep_graphic_dh_upper,
+	font_sep_graphic,
+	font_sep_graphic_dh_lower
+};
 
 // Wait for VSYNC and feed an appropriate number of dummy lines
 // into the PIO so that the next thing to go in the FIFO is the
@@ -74,7 +104,7 @@ static bool __force_inline wait_for_vsync(void)
 	// either 17 or 49us apart, indicating which field; however on
 	// proper video with equalising pulses there could be a multiple
 	// of 64us extra so we take the number mod 64
-	return (((falling - vsync_end) % 64) > 32);
+	return (((falling - vsync_end) % 64) < 32);
 }
 
 
