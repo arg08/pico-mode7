@@ -120,7 +120,8 @@ static bool __force_inline wait_for_vsync(void)
 // to produce a continuous display, with the caller having a little time
 // to do some housekeeping between calls and still get there in time for
 // the next VSYNC.
-void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
+void __not_in_flash_func(mode7_display_field)
+	(const uint8_t *ttxt_buf, bool flash_on)
 {
 	unsigned line;			// Which line out of the 25? (0..24)
 	unsigned row;			// Which pixel row within a line (0..19)
