@@ -62,7 +62,7 @@ static void core1_main_loop(void)
 		if (carousel_count++ >= CAROUSEL_RATE)
 		{
 			carousel_count = 0;
-			current_page++;
+			page_no++;
 			if (page_no >= NOOF_TEST_PAGES) page_no = 0;
 			current_page = test_pages[page_no];
 		}
