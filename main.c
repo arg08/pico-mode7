@@ -132,6 +132,8 @@ int main(void)
 			}
 			else if (c == 'B')
 			{
+				printf("Exiting to bootrom\n");
+				busy_wait_us(100000);
 				// 1st parameter is LED to use for mass storage activity
 				// 2nd param enables both USB mass storage and PICOBOOT
 				reset_usb_boot(1 << PICO_DEFAULT_LED_PIN, 0);
