@@ -12,11 +12,8 @@
 .define public PIN_O0         18
 .define public PIN_NOE        19
 
-;.define public PIN_RGB_EN      0
-;.define public PIN_SYNC_IN     1
-
-.define public PIN_RGB_EN      2
-.define public PIN_SYNC_IN     3
+.define public PIN_RGB_EN      0
+.define public PIN_SYNC_IN     1
 
 .define public PIN_RGB_RO     10
 .define public PIN_RGB_GO     11

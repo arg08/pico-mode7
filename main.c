@@ -88,7 +88,7 @@ int main(void)
 	clock_ok = set_sys_clock_khz(SYSCLK_MHZ * 1000, false);
 
 	// USB console for monitoring
-	stdio_init_all();
+	stdio_usb_init();
 	printf("Wahoo!\n");
 
 	// Set up all the pins that will be GPIOs
