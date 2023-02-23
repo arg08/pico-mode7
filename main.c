@@ -89,7 +89,6 @@ int main(void)
 
 	// USB console for monitoring
 	stdio_usb_init();
-	printf("Wahoo!\n");
 
 	// Set up all the pins that will be GPIOs
 	gpio_init(PICO_DEFAULT_LED_PIN);
@@ -137,6 +136,16 @@ int main(void)
 				// 1st parameter is LED to use for mass storage activity
 				// 2nd param enables both USB mass storage and PICOBOOT
 				reset_usb_boot(1 << PICO_DEFAULT_LED_PIN, 0);
+
+			}
+			else if (c == 'C')
+			{
+				unsigned sum = 0;
+				uint32_t *p = (uint32_t *)0x10000000;
+				printf("Thrashing cache\n");
+				for (unsigned i = 0; i < 16384; i++)
+					sum += *p++;
+				printf("Sum was %u\n", sum);
 
 			}
 			else printf("You pressed: %02x\n", c);
