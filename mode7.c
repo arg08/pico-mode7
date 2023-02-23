@@ -38,6 +38,10 @@
    4 - graphics
    8 - separated mode
 */
+#define	BIT_DBL_HEIGHT	1
+#define	BIT_2ND_ROW_DH	2
+#define	BIT_GRAPHICS	4
+#define	BIT_SEPARATED	8
 static const uint16_t * const font_list[16] = {
 	font_std,
 	font_std_dh_upper,
@@ -123,9 +127,11 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 	unsigned ch_pos;		// Which character within the line (0..39)
 
 	// Decode state - should be bits in a word
-	bool graphics, separated, dheight, hold_gr, flash, conceal;
+	unsigned font_mode;		// BIT_DBL_HEIGHT etc.
 
-	bool dh_this_row, dh_row2;
+	bool hold_gr, flash, conceal;
+
+	bool dh_this_row;
 
 	// Points to the current character within the 40x25 buffer
 	const uint8_t  *chp;
@@ -150,7 +156,7 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 	if (wait_for_vsync()) row = 0;
 	else row = 1;
 
-	dh_row2 = false;
+	font_mode = 0;
 	line = 0;
 	do
 	{
@@ -163,16 +169,14 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 
 		font = font_list[0];
 		held_cell = font;	// First entry in font is space
-		graphics = false;
-		separated = false;
-		dheight = false;
 		dh_this_row = false;
 		flash = false;
 		conceal = false;
 		hold_gr = false;
+		// Reset font mode apart from BIT_2ND_ROW_DH
+		font_mode &= ~(BIT_DBL_HEIGHT | BIT_GRAPHICS | BIT_SEPARATED);
 
-		font = font_list[dheight | (dh_row2 * 2) |
-			(graphics * 4) | separated * 8];
+		font = font_list[font_mode];
 
 		// Index the 40x25 buffer.  Note that we scan along each character line
 		// multiple times as we do the pixel rows, so we can't just keep
@@ -201,7 +205,7 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 	
 				// Select the font cell for this character - normally space,
 				// unless hold graphics in effect
-				if (graphics && hold_gr) fontp = held_cell;
+				if ((font_mode & BIT_GRAPHICS) && hold_gr) fontp = held_cell;
 				else fontp = font_list[0];
 			}
 			else
@@ -212,12 +216,19 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 	
 			// Consider recording this character as a possible future held
 			// graphic - only for graphic chars.
-			if (graphics && (((ch >= 0x20) && (ch < 0x40)) || (ch > 0x60)))
+			if ((font_mode & BIT_GRAPHICS)
+				&& (((ch >= 0x20) && (ch < 0x40)) || (ch > 0x60)))
+			{
 				held_cell = fontp;
+			}
 
 			// In second row of double height, any normal height characters
 			// get replaced by spaces (1st cell of all fonts is space).
-			if (dh_row2 && !dheight) fontp = font_list[0];
+			if (font_mode & (BIT_2ND_ROW_DH | BIT_DBL_HEIGHT)
+				== BIT_2ND_ROW_DH)
+			{
+				fontp = font_list[0];
+			}
 
 			// If this character is flashing and the flash state is 'off'
 			// replace it with a blank.
@@ -252,7 +263,7 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 						// Change the foreground colour (in bits 8..10)
 						// to the value of the control character.
 						colours = (colours & ~0x700) | (ch << 8);
-						graphics = false;
+						font_mode &= ~BIT_GRAPHICS;
 						break;
 
 					case 0x08:		// Flash
@@ -264,11 +275,11 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 						break;
 
 					case 0x0c:		// Normal height
-						dheight = false;
+						font_mode &= ~BIT_DBL_HEIGHT;
 						break;
 
 					case 0x0d:		// Double height
-						dheight = true;
+						font_mode |= BIT_DBL_HEIGHT;
 						dh_this_row = true;
 						break;
 
@@ -282,7 +293,7 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 						// Change the foreground colour (in bits 8..10)
 						// to the value of the low bits of the ctrl character.
 						colours = (colours & ~0x700) | ((ch & 7) << 8);
-						graphics = true;
+						font_mode |= BIT_GRAPHICS;
 						break;
 
 					case 0x18:		// Conceal
@@ -290,11 +301,11 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 						break;
 
 					case 0x19:		// Contiguous graphics
-						separated = false;
+						font_mode &= ~BIT_SEPARATED;
 						break;
 
 					case 0x1a:		// Separated graphics
-						separated = true;
+						font_mode |= BIT_SEPARATED;
 						break;
 
 					case 0x1e:		// Hold graphics
@@ -307,8 +318,7 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 				}
 
 				// Choose appropriate font resulting from change (if any)
-				font = font_list[dheight | (dh_row2 * 2) |
-					(graphics * 4) | separated * 8];
+				font = font_list[font_mode];
 
 			}
 		}
@@ -335,13 +345,13 @@ void mode7_display_field(const uint8_t *ttxt_buf, bool flash_on)
 			// a BBC micro that requires the user to fill in the 2nd line
 			// so we just set the flags that will cause us to select the
 			// lower-half font next time round.
-			if (dh_row2)
+			if (font_mode & BIT_2ND_ROW_DH)
 			{
-				dh_row2 = false;
+				font_mode &= ~BIT_2ND_ROW_DH;
 			}
 			else if (dh_this_row)
 			{
-				dh_row2 = true;
+				font_mode |= BIT_2ND_ROW_DH;
 			}
 		}
 	} while (line < 25);
