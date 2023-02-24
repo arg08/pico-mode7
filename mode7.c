@@ -143,10 +143,15 @@ void __not_in_flash_func(mode7_display_field)
 	// at character value 0x20 and contains 96 characters, formatted
 	// as one row of pixels per 16-bit word.
 	const uint16_t *font;		
+
 	// fontp is the current character within the font, used only momentarily
 	const uint16_t *fontp;
+
 	// held_cell is a stashed fontp value for the character that is being
-	// 'held' in Hold Graphics mode
+	// 'held' in Hold Graphics mode.  Note that the held cell can be
+	// held from some time before the HG control code appears on the line,
+	// so this is distinct from the hold_gr flag that tells us whether or not
+	// to use the held character.
 	const uint16_t *held_cell;
 
 #ifdef CONCEAL_SUPPORT
@@ -189,8 +194,9 @@ void __not_in_flash_func(mode7_display_field)
 			ch = (*chp++) & 0x7f;
 			if (ch < 0x20)
 			{
-				// Only background changes take effect in the same cell as
-				// they occur - all others occur after rendering the cell.
+				// Only background changes and hold/release graphics
+				// take effect in the same cell as they occur - all others
+				// occur after rendering the cell.
 				switch (ch)
 				{
 					case 0x1c:		// Black background
@@ -201,6 +207,14 @@ void __not_in_flash_func(mode7_display_field)
 						// The new background colour is the current foreground,
 						// so copy down the bits
 						colours = (colours & ~7) | ((colours >> 8) & 7);
+						break;
+
+					case 0x1e:		// Hold graphics
+						hold_gr = true;
+						break;
+
+					case 0x1f:		// Release graphics	
+						hold_gr = false;
 						break;
 				}
 	
@@ -265,6 +279,8 @@ void __not_in_flash_func(mode7_display_field)
 						// to the value of the control character.
 						colours = (colours & ~0x700) | (ch << 8);
 						font_mode &= ~BIT_GRAPHICS;
+						// Change of text/graphics mode cancels hold graphic
+						held_cell = font;
 						break;
 
 					case 0x08:		// Flash
@@ -277,11 +293,15 @@ void __not_in_flash_func(mode7_display_field)
 
 					case 0x0c:		// Normal height
 						font_mode &= ~BIT_DBL_HEIGHT;
+						// Change of double-height mode cancels hold graphic
+						held_cell = font;
 						break;
 
 					case 0x0d:		// Double height
 						font_mode |= BIT_DBL_HEIGHT;
 						dh_this_row = true;
+						// Change of double-height mode cancels hold graphic
+						held_cell = font;
 						break;
 
 					case 0x11:		// Mosaic red
@@ -295,6 +315,8 @@ void __not_in_flash_func(mode7_display_field)
 						// to the value of the low bits of the ctrl character.
 						colours = (colours & ~0x700) | ((ch & 7) << 8);
 						font_mode |= BIT_GRAPHICS;
+						// Change of text/graphics mode cancels hold graphic
+						held_cell = font;
 						break;
 
 					case 0x18:		// Conceal
@@ -309,13 +331,6 @@ void __not_in_flash_func(mode7_display_field)
 						font_mode |= BIT_SEPARATED;
 						break;
 
-					case 0x1e:		// Hold graphics
-						hold_gr = true;
-						break;
-
-					case 0x1f:		// Release graphics	
-						hold_gr = false;
-						break;
 				}
 
 				// Choose appropriate font resulting from change (if any)
